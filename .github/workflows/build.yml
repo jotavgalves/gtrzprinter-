@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -96,9 +96,27 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: GTRZ-Printer-2.0.0
+          name: GTRZ-Printer-2.0.1
           if-no-files-found: error
           retention-days: 30
           path: |
+            dist/GTRZ-Printer-Setup.exe
+            dist/GTRZ-Printer-Portable.zip
+
+      - name: Publish stable GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.1
+          name: GTRZ Printer 2.0.1
+          body: |
+            GTRZ Printer 2.0.1.
+
+            - Instalador Windows self-contained.
+            - Suporte nativo a --server, --client e --auto.
+            - --provision-client descobre o servidor e instala a GTRZ POS-80 quando disponível.
+            - Não depende de versões anteriores do GTRZ Printer.
+          make_latest: true
+          files: |
             dist/GTRZ-Printer-Setup.exe
             dist/GTRZ-Printer-Portable.zip
