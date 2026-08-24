@@ -1,0 +1,102 @@
+name: Build GTRZ Printer
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src/GTRZPrinter/GTRZPrinter.csproj
+
+      - name: Publish self-contained single EXE
+        shell: pwsh
+        run: |
+          dotnet publish src/GTRZPrinter/GTRZPrinter.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -o installer/publish `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            /p:EnableCompressionInSingleFile=true
+
+          $exe = 'installer/publish/GTRZ Printer.exe'
+          if (-not (Test-Path $exe)) {
+            throw "GTRZ Printer.exe não foi gerado."
+          }
+          Write-Host "EXE gerado: $((Get-Item $exe).Length) bytes"
+
+      - name: Ensure Inno Setup
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'ISCC.exe não encontrado após a instalação do Inno Setup.' }
+          & $iscc 'installer/GTRZPrinter.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou com código $LASTEXITCODE" }
+          if (-not (Test-Path 'dist/GTRZ-Printer-Setup.exe')) { throw 'Instalador não foi gerado.' }
+
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          if (Test-Path 'dist/GTRZ-Printer-Portable.zip') { Remove-Item 'dist/GTRZ-Printer-Portable.zip' -Force }
+          Compress-Archive -Path 'installer/publish/*' -DestinationPath 'dist/GTRZ-Printer-Portable.zip' -CompressionLevel Optimal
+
+      - name: Verify deliverables
+        shell: pwsh
+        run: |
+          $required = @(
+            'installer/publish/GTRZ Printer.exe',
+            'dist/GTRZ-Printer-Setup.exe',
+            'dist/GTRZ-Printer-Portable.zip'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Artefato ausente: $path" }
+            $item = Get-Item $path
+            if ($item.Length -lt 1024) { throw "Artefato inválido ou vazio: $path" }
+            Write-Host "$path -> $($item.Length) bytes"
+          }
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GTRZ-Printer-2.0.0
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/GTRZ-Printer-Setup.exe
+            dist/GTRZ-Printer-Portable.zip
